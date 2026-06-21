@@ -34,6 +34,14 @@ block of links, caches new links, and replies.
   your Claude Max subscription** (run `claude` once interactively to authenticate).
 - A Telegram bot token from [@BotFather](https://t.me/BotFather).
 
+## Quick start on Windows (one click)
+
+The easiest path: after cloning, just run **`start.bat`** (double-click it, or run
+`start.bat` in a terminal). It creates the virtual environment, installs
+dependencies, opens `.env` for you to paste your Telegram token, runs the preflight,
+and starts the bot — no PowerShell activation needed. You still need Python 3.10+,
+the Claude CLI logged in with Max, and your bot token.
+
 ## Run on your own computer
 
 Because the bot uses your Claude **Max** login via the CLI, run it on the machine
