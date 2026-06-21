@@ -34,25 +34,55 @@ block of links, caches new links, and replies.
   your Claude Max subscription** (run `claude` once interactively to authenticate).
 - A Telegram bot token from [@BotFather](https://t.me/BotFather).
 
-## Setup
+## Run on your own computer
+
+Because the bot uses your Claude **Max** login via the CLI, run it on the machine
+where `claude` is authenticated (your own computer).
 
 ```bash
+# 1. Get the code
+git clone <repo-url> AllDataCars        # or: git pull
+cd AllDataCars
+git checkout claude/telegram-fleet-agent-uttm8a
+
+# 2. Python deps (virtualenv recommended)
+python3 -m venv .venv
+source .venv/bin/activate                # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
-# Edit .env and set TELEGRAM_BOT_TOKEN (and optionally ALLOWED_USER_IDS)
-```
 
-Verify the Claude CLI is authenticated:
+# 3. Log in to the Claude CLI with your Max account (one-time, interactive)
+claude                                    # complete login, then exit
+echo "Reply with OK" | claude -p --output-format json   # should print JSON with "result"
 
-```bash
-echo "Reply with OK" | claude -p --output-format json
-```
+# 4. Configure secrets
+cp .env.example .env                      # Windows: copy .env.example .env
+#   edit .env -> set TELEGRAM_BOT_TOKEN=<token from @BotFather>
 
-Run the bot:
-
-```bash
+# 5. Preflight + run
+python doctor.py                          # all checks should be green
 python bot.py
 ```
+
+Or use the launcher, which runs the preflight then the bot:
+
+```bash
+./run.sh        # macOS / Linux
+run.bat         # Windows
+```
+
+`python doctor.py` checks Python, dependencies, the Claude CLI + Max login, and the
+Telegram token, with fix hints for anything that's off.
+
+### Troubleshooting
+
+- **`ModuleNotFoundError: _cffi_backend`** when importing `telegram`:
+  `pip install --upgrade cffi cryptography`.
+- **Claude auth probe fails**: run `claude` once interactively to log in, then retry.
+- **Answers time out**: web search can take 30–120s — raise `CLAUDE_TIMEOUT` in `.env`.
+- **Keep the token safe**: it lives only in `.env` (git-ignored). If it ever leaks,
+  regenerate it in @BotFather with `/revoke`.
+- **Lock the bot to yourself**: set `ALLOWED_USER_IDS` in `.env` to your Telegram user
+  ID (get it from @userinfobot).
 
 ## Usage
 
