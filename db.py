@@ -87,24 +87,45 @@ def _schema_is_healthy() -> bool:
 
     The 'foreign key mismatch' error appears when the parent ``vehicles`` table
     exists but lost its PRIMARY KEY (e.g. a partially-written DB from a crashed
-    first run). Detect that so we can recreate the file instead of failing on
-    every message.
+    first run). We detect it two ways: the ``vehicles`` table must have a primary
+    key, and the ``messages -> vehicles`` foreign key must actually resolve. The
+    second check is a throwaway INSERT that is always rolled back, so it never
+    persists anything.
     """
+    conn = _connect()
     try:
-        with _connect() as conn:
-            tables = {
-                r["name"]
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
-            if "vehicles" not in tables:
-                return True  # nothing (or partial) yet — executescript will build it
-            info = conn.execute("PRAGMA table_info(vehicles)").fetchall()
-            # A healthy vehicles table has a primary-key column (pk > 0).
-            return any(r["pk"] for r in info)
+        tables = {
+            r["name"]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "vehicles" not in tables:
+            return True  # nothing (or partial) yet — executescript will build it
+
+        info = conn.execute("PRAGMA table_info(vehicles)").fetchall()
+        if not any(r["pk"] for r in info):
+            return False
+
+        if "messages" in tables:
+            try:
+                conn.execute(
+                    "INSERT INTO messages (vehicle_id, user_id, role, content, created_at) "
+                    "VALUES (NULL, -1, '_probe_', '_probe_', ?)",
+                    (_now(),),
+                )
+            except sqlite3.OperationalError as exc:
+                if "foreign key mismatch" in str(exc).lower():
+                    return False
+                raise
+            finally:
+                conn.rollback()  # never persist the probe row
+        return True
     except sqlite3.DatabaseError:
         return False
+    finally:
+        conn.rollback()
+        conn.close()
 
 
 def init_db() -> None:
