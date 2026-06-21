@@ -102,6 +102,10 @@ In Telegram:
 - `/info` — show the active vehicle's details.
 - Send a **PDF** — stored as an FSM document for the active vehicle (text extracted).
 - `/fsm` — list stored FSM documents.
+- `/plate <מספר רכב>` — look up a license plate in the Israeli public registries
+  (`data.gov.il`): the private/commercial registry **and** the personal-import
+  registry. If found, shows the car's details and offers a one-tap **➕ Add to fleet**
+  button that auto-fills make/model/year/engine.
 - `/links` — show cached videos and PDF manuals.
 - Just **ask** — e.g. _"How do I replace the front brake pads?"_ — and you'll get a
   step-by-step guide plus video and PDF links.

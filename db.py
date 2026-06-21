@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
     year       TEXT,
     vin        TEXT,
     engine     TEXT,
+    plate      TEXT,
     notes      TEXT,
     created_at TEXT NOT NULL
 );
@@ -121,6 +122,14 @@ def init_db() -> None:
 
     with _connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Lightweight migrations: add columns introduced after the first release."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(vehicles)").fetchall()}
+    if "plate" not in cols:
+        conn.execute("ALTER TABLE vehicles ADD COLUMN plate TEXT")
 
 
 # --------------------------------------------------------------------------- #
@@ -134,16 +143,26 @@ def add_vehicle(
     year: str = "",
     vin: str = "",
     engine: str = "",
+    plate: str = "",
     notes: str = "",
 ) -> int:
     with _connect() as conn:
         cur = conn.execute(
             """INSERT INTO vehicles
-                   (user_id, name, make, model, year, vin, engine, notes, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, name, make, model, year, vin, engine, notes, _now()),
+                   (user_id, name, make, model, year, vin, engine, plate, notes, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, name, make, model, year, vin, engine, plate, notes, _now()),
         )
         return int(cur.lastrowid)
+
+
+def find_vehicle_by_plate(user_id: int, plate: str) -> Optional[dict[str, Any]]:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM vehicles WHERE user_id = ? AND plate = ? ORDER BY id LIMIT 1",
+            (user_id, plate),
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def list_vehicles(user_id: int) -> list[dict[str, Any]]:

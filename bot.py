@@ -18,6 +18,7 @@ from telegram.ext import (
 import agent
 import config
 import db
+import vehicle_lookup
 from claude_client import ClaudeError
 
 logging.basicConfig(
@@ -34,6 +35,7 @@ HELP_TEXT = (
     "videos, and PDF service manuals — powered by Claude via your computer.\n\n"
     "*Commands*\n"
     "/addvehicle `<Make> <Model> <Year>` — register a vehicle\n"
+    "/plate `<מספר רכב>` — חיפוש רכב במאגרי data.gov.il והוספה לצי\n"
     "/vehicles — list vehicles and pick the active one\n"
     "/select `<id>` — set the active vehicle\n"
     "/info — show the active vehicle\n"
@@ -61,9 +63,15 @@ async def _guard(update: Update) -> bool:
 
 
 async def _send_long(update: Update, text: str, **kwargs) -> None:
-    """Send text in chunks under Telegram's length limit."""
-    for i in range(0, len(text), MAX_MSG):
-        await update.effective_message.reply_text(text[i : i + MAX_MSG], **kwargs)
+    """Send text in chunks under Telegram's length limit.
+
+    ``reply_markup`` (if any) is attached only to the final chunk.
+    """
+    reply_markup = kwargs.pop("reply_markup", None)
+    chunks = [text[i : i + MAX_MSG] for i in range(0, len(text), MAX_MSG)] or [""]
+    for idx, chunk in enumerate(chunks):
+        extra = {"reply_markup": reply_markup} if idx == len(chunks) - 1 and reply_markup else {}
+        await update.effective_message.reply_text(chunk, **kwargs, **extra)
 
 
 # --------------------------------------------------------------------------- #
@@ -174,7 +182,7 @@ async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not vehicle:
         await update.message.reply_text("No active vehicle. Use /vehicles or /addvehicle.")
         return
-    fields = ["make", "model", "year", "engine", "vin", "notes"]
+    fields = ["make", "model", "year", "engine", "plate", "vin", "notes"]
     lines = [f"*{vehicle['name']}* (id `{vehicle['id']}`)"]
     lines += [f"- {f.capitalize()}: {vehicle[f]}" for f in fields if vehicle.get(f)]
     fsm_count = len(db.get_fsm_docs(vehicle["id"]))
@@ -227,6 +235,94 @@ async def cmd_links(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _send_long(
         update, "\n".join(lines),
         parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# License-plate lookup (data.gov.il registries)
+# --------------------------------------------------------------------------- #
+async def cmd_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _guard(update):
+        return
+    raw = " ".join(context.args) if context.args else ""
+    plate = vehicle_lookup.normalize_plate(raw)
+    if not plate:
+        await update.message.reply_text(
+            "שימוש: /plate <מספר רכב>\nלמשל: /plate 12345678"
+        )
+        return
+
+    await update.effective_chat.send_action(ChatAction.TYPING)
+    placeholder = await update.message.reply_text(f"🔎 בודק את מספר רכב {plate} במאגרים…")
+
+    try:
+        results = await vehicle_lookup.lookup_plate(plate)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Plate lookup failed")
+        await placeholder.edit_text(f"⚠️ שגיאה בחיפוש: {exc}")
+        return
+
+    lines = [f"🚗 *מספר רכב {plate}*"]
+    found_any = False
+    found_record = None
+    for source, res in results.items():
+        label = vehicle_lookup.SOURCE_LABELS.get(source, source)
+        if res.get("error"):
+            lines.append(f"\n❓ {label}: שגיאה ({res['error']})")
+        elif res["found"]:
+            found_any = True
+            found_record = res["record"]
+            lines.append(f"\n✅ נמצא ב{label}:")
+            lines.append(vehicle_lookup.format_record(res["record"]))
+        else:
+            lines.append(f"\n❌ לא נמצא ב{label}")
+
+    keyboard = None
+    if found_any and found_record is not None:
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("➕ הוסף לצי", callback_data=f"addplate:{plate}")]]
+        )
+
+    await placeholder.delete()
+    await _send_long(
+        update, "\n".join(lines),
+        parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+async def on_addplate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if not _authorized(user_id):
+        return
+    plate = query.data.split(":", 1)[1]
+
+    existing = db.find_vehicle_by_plate(user_id, plate)
+    if existing:
+        db.set_active_vehicle(user_id, existing["id"])
+        await query.edit_message_text(
+            f"✅ הרכב {plate} כבר בצי (*{existing['name']}*) — הוגדר כפעיל.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    results = await vehicle_lookup.lookup_plate(plate)
+    record = next(
+        (r["record"] for r in results.values() if r.get("found") and r.get("record")), None
+    )
+    if not record:
+        await query.edit_message_text("⚠️ לא הצלחתי לאחזר שוב את פרטי הרכב. נסה /plate שוב.")
+        return
+
+    fields = vehicle_lookup.record_to_vehicle_fields(record)
+    vehicle_id = db.add_vehicle(user_id, **fields)
+    db.set_active_vehicle(user_id, vehicle_id)
+    await query.edit_message_text(
+        f"✅ נוסף לצי: *{fields['name']}* (id `{vehicle_id}`) והוגדר כפעיל.\n"
+        "אפשר לשלוח PDF של ספר שירות, או פשוט לשאול שאלת תחזוקה.",
+        parse_mode=ParseMode.MARKDOWN,
     )
 
 
@@ -339,7 +435,9 @@ def main() -> None:
     app.add_handler(CommandHandler("info", cmd_info))
     app.add_handler(CommandHandler("fsm", cmd_fsm))
     app.add_handler(CommandHandler("links", cmd_links))
+    app.add_handler(CommandHandler("plate", cmd_plate))
     app.add_handler(CallbackQueryHandler(on_select_callback, pattern=r"^select:"))
+    app.add_handler(CallbackQueryHandler(on_addplate_callback, pattern=r"^addplate:"))
     app.add_handler(MessageHandler(filters.Document.PDF, on_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
