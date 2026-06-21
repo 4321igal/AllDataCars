@@ -6,12 +6,15 @@ message history used for context.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from config import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS vehicles (
@@ -78,7 +81,44 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _schema_is_healthy() -> bool:
+    """Return True if an existing DB has a usable schema.
+
+    The 'foreign key mismatch' error appears when the parent ``vehicles`` table
+    exists but lost its PRIMARY KEY (e.g. a partially-written DB from a crashed
+    first run). Detect that so we can recreate the file instead of failing on
+    every message.
+    """
+    try:
+        with _connect() as conn:
+            tables = {
+                r["name"]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "vehicles" not in tables:
+                return True  # nothing (or partial) yet — executescript will build it
+            info = conn.execute("PRAGMA table_info(vehicles)").fetchall()
+            # A healthy vehicles table has a primary-key column (pk > 0).
+            return any(r["pk"] for r in info)
+    except sqlite3.DatabaseError:
+        return False
+
+
 def init_db() -> None:
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
+    if Path(DB_PATH).exists() and not _schema_is_healthy():
+        backup = Path(f"{DB_PATH}.corrupt.bak")
+        backup.unlink(missing_ok=True)
+        Path(DB_PATH).rename(backup)
+        logger.warning(
+            "Existing database had a malformed schema; backed it up to %s and "
+            "recreating a clean one.",
+            backup,
+        )
+
     with _connect() as conn:
         conn.executescript(SCHEMA)
 
