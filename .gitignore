@@ -1,0 +1,20 @@
+# Secrets
+.env
+
+# Local data
+data/
+fsm_files/
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
