@@ -94,7 +94,21 @@ Telegram token, with fix hints for anything that's off.
 
 ## Usage
 
-In Telegram:
+### Guided flow (the simple path)
+
+Just send **`/start`** and follow along:
+
+1. The bot asks for a **license plate** (מספר רכב).
+2. You send the plate.
+3. The bot looks it up in both `data.gov.il` registries (regular + personal import)
+   and shows the car's details, then sets it as your active vehicle.
+4. The bot asks what you want to know.
+5. You ask (e.g. "איך מחליפים רפידות בלם?") and get a step-by-step answer plus
+   repair videos and PDF manuals. Keep asking, or send a new plate to switch cars.
+
+### Commands (power-user path)
+
+The commands below also work alongside the guided flow:
 
 - `/addvehicle Toyota Corolla 2015` — register a vehicle (becomes active).
 - `/vehicles` — list your fleet; tap a button to switch the active vehicle.

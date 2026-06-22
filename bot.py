@@ -11,6 +11,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    ConversationHandler,
     MessageHandler,
     filters,
 )
@@ -376,16 +377,13 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # --------------------------------------------------------------------------- #
 # Free-text message -> agent
 # --------------------------------------------------------------------------- #
-async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _guard(update):
-        return
-    text = (update.message.text or "").strip()
-    if not text:
-        return
+async def _send_agent_answer(update: Update, user_id: int, text: str) -> None:
+    """Run the agent for one question and send the answer + link blocks.
 
-    user_id = update.effective_user.id
+    Shared by the command-path message handler and the guided conversation.
+    """
     await update.effective_chat.send_action(ChatAction.TYPING)
-    placeholder = await update.message.reply_text("🔧 Working on it — searching manuals & videos…")
+    placeholder = await update.message.reply_text("🔧 עובד על זה — מחפש מדריכים וסרטונים…")
 
     try:
         result = await agent.handle_message(user_id, text)
@@ -398,7 +396,6 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     await placeholder.delete()
-
     await _send_long(update, result.answer)
 
     extras: list[str] = []
@@ -417,6 +414,132 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
 
 
+async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _guard(update):
+        return
+    text = (update.message.text or "").strip()
+    if not text:
+        return
+    await _send_agent_answer(update, update.effective_user.id, text)
+
+
+# --------------------------------------------------------------------------- #
+# Guided conversation: /start -> ask plate -> details -> ask question -> answer
+# --------------------------------------------------------------------------- #
+ASK_PLATE, ASK_QUESTION = range(2)
+
+
+def _looks_like_plate(text: str) -> bool:
+    """A bare license plate: mostly digits, 6–8 of them, no spaces/words."""
+    stripped = text.replace("-", "").replace(" ", "")
+    return stripped.isdigit() and 5 <= len(stripped) <= 8
+
+
+async def start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not await _guard(update):
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "🚗 שלום! אני סוכן התחזוקה של הצי שלך.\n\n"
+        "שלח לי *מספר רכב* (לוחית רישוי) ואבדוק אותו במאגרי משרד התחבורה.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    return ASK_PLATE
+
+
+async def _lookup_and_show(update: Update, user_id: int, raw: str) -> int:
+    """Look up a plate, show details, activate the vehicle, ask the question.
+
+    Returns the next conversation state.
+    """
+    plate = vehicle_lookup.normalize_plate(raw)
+    if not plate:
+        await update.message.reply_text("לא זיהיתי מספר רכב. שלח ספרות בלבד, למשל 12345678.")
+        return ASK_PLATE
+
+    await update.effective_chat.send_action(ChatAction.TYPING)
+    placeholder = await update.message.reply_text(f"🔎 בודק את מספר רכב {plate} במאגרים…")
+
+    try:
+        results = await vehicle_lookup.lookup_plate(plate)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Plate lookup failed")
+        await placeholder.edit_text(f"⚠️ שגיאה בחיפוש: {exc}\nנסה מספר רכב נוסף.")
+        return ASK_PLATE
+
+    lines = [f"🚗 *מספר רכב {plate}*"]
+    found_record = None
+    for source, res in results.items():
+        label = vehicle_lookup.SOURCE_LABELS.get(source, source)
+        if res.get("error"):
+            lines.append(f"\n❓ {label}: שגיאה ({res['error']})")
+        elif res["found"]:
+            found_record = found_record or res["record"]
+            lines.append(f"\n✅ נמצא ב{label}:")
+            lines.append(vehicle_lookup.format_record(res["record"]))
+        else:
+            lines.append(f"\n❌ לא נמצא ב{label}")
+
+    await placeholder.delete()
+    await _send_long(
+        update, "\n".join(lines),
+        parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True,
+    )
+
+    if found_record is None:
+        await update.message.reply_text(
+            "הרכב לא נמצא באף מאגר. שלח מספר רכב אחר, או /cancel ליציאה."
+        )
+        return ASK_PLATE
+
+    # Save + activate the vehicle so the LLM has context (reuse if already saved).
+    existing = db.find_vehicle_by_plate(user_id, plate)
+    if existing:
+        db.set_active_vehicle(user_id, existing["id"])
+        name = existing["name"]
+    else:
+        fields = vehicle_lookup.record_to_vehicle_fields(found_record)
+        vehicle_id = db.add_vehicle(user_id, **fields)
+        db.set_active_vehicle(user_id, vehicle_id)
+        name = fields["name"]
+
+    await update.message.reply_text(
+        f"מצוין — *{name}* מוגדר כעת כרכב הפעיל.\n\n"
+        "❓ *מה תרצה לדעת על הרכב?*\n"
+        "_למשל: איך מחליפים רפידות בלם? מתי להחליף שרשרת תזמון? כמה שמן מנוע צריך?_",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    return ASK_QUESTION
+
+
+async def got_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not await _guard(update):
+        return ConversationHandler.END
+    return await _lookup_and_show(update, update.effective_user.id, update.message.text or "")
+
+
+async def got_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not await _guard(update):
+        return ConversationHandler.END
+    text = (update.message.text or "").strip()
+    if not text:
+        return ASK_QUESTION
+
+    # Allow switching cars mid-conversation by sending a new plate.
+    if _looks_like_plate(text):
+        return await _lookup_and_show(update, update.effective_user.id, text)
+
+    await _send_agent_answer(update, update.effective_user.id, text)
+    await update.message.reply_text(
+        "אפשר לשאול שאלה נוספת על אותו רכב, או לשלוח מספר רכב חדש כדי להחליף רכב."
+    )
+    return ASK_QUESTION
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("בוטל. שלח /start כדי להתחיל מחדש.")
+    return ConversationHandler.END
+
+
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
@@ -427,7 +550,22 @@ def main() -> None:
 
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", cmd_start))
+    # Guided conversation: /start -> plate -> details -> question -> answer.
+    conversation = ConversationHandler(
+        entry_points=[CommandHandler("start", start_flow)],
+        states={
+            ASK_PLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, got_plate)],
+            ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, got_question)],
+        },
+        fallbacks=[
+            CommandHandler("start", start_flow),
+            CommandHandler("cancel", cancel),
+        ],
+        allow_reentry=True,
+    )
+    app.add_handler(conversation)
+
+    # Auxiliary commands (still available outside / alongside the conversation).
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("addvehicle", cmd_addvehicle))
     app.add_handler(CommandHandler("vehicles", cmd_vehicles))
@@ -439,7 +577,13 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_select_callback, pattern=r"^select:"))
     app.add_handler(CallbackQueryHandler(on_addplate_callback, pattern=r"^addplate:"))
     app.add_handler(MessageHandler(filters.Document.PDF, on_document))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+
+    # Text sent outside any conversation: nudge the user to start.
+    async def _nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await _guard(update):
+            await update.message.reply_text("שלח /start כדי להתחיל 🙂")
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _nudge))
 
     logger.info("AllDataCars bot starting (polling)…")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
