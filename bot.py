@@ -58,8 +58,17 @@ async def _guard(update: Update) -> bool:
     user = update.effective_user
     if user and _authorized(user.id):
         return True
-    if update.effective_message:
-        await update.effective_message.reply_text("⛔ You are not authorized to use this bot.")
+    if user:
+        logger.warning("Unauthorized access attempt from user_id=%s", user.id)
+    if update.effective_message and user:
+        await update.effective_message.reply_text(
+            "⛔ אינך מורשה להשתמש בבוט.\n"
+            f"ה-ID שלך בטלגרם הוא: `{user.id}`\n\n"
+            "כדי לאשר את עצמך, ערוך את קובץ `.env` והגדר:\n"
+            f"`ALLOWED_USER_IDS={user.id}`\n"
+            "(או השאר `ALLOWED_USER_IDS=` ריק כדי לאפשר לכולם), ואז הפעל מחדש את הבוט.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
     return False
 
 
