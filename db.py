@@ -261,6 +261,16 @@ def get_fsm_docs(vehicle_id: int) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
 
 
+def get_fsm_dirs(vehicle_id: int) -> list[str]:
+    """Local FSM directory paths (kind='dir') registered for a vehicle."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT local_path FROM fsm_docs WHERE vehicle_id = ? AND kind = 'dir'",
+            (vehicle_id,),
+        ).fetchall()
+    return [r["local_path"] for r in rows if r["local_path"]]
+
+
 # --------------------------------------------------------------------------- #
 # Cached links (videos / PDFs)
 # --------------------------------------------------------------------------- #

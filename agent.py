@@ -60,11 +60,12 @@ async def handle_message(user_id: int, text: str) -> AgentResult:
     history = db.recent_messages(vehicle_id, user_id, limit=6)
 
     prompt = build_user_prompt(text, vehicle, fsm_docs, cached_links, history)
+    fsm_dirs = tuple(db.get_fsm_dirs(vehicle_id)) if vehicle_id else ()
 
     db.add_message(vehicle_id, user_id, "user", text)
 
     try:
-        raw = await query(prompt, system=SYSTEM_PROMPT)
+        raw = await query(prompt, system=SYSTEM_PROMPT, add_dirs=fsm_dirs)
     except ClaudeError:
         raise
 

@@ -28,11 +28,18 @@ async def query(
     allowed_tools: tuple[str, ...] = DEFAULT_TOOLS,
     timeout: int = CLAUDE_TIMEOUT,
     model: str = CLAUDE_MODEL,
+    add_dirs: tuple[str, ...] = (),
 ) -> str:
     """Run a single headless Claude query and return the text result.
 
     The prompt is fed on stdin to avoid shell-escaping / argument-length issues.
+    When ``add_dirs`` is given (e.g. a vehicle's FSM markdown folder), those
+    directories are exposed to Claude via ``--add-dir`` and the Read/Grep/Glob
+    tools are enabled so it can search the manual itself.
     """
+    if add_dirs:
+        allowed_tools = tuple(dict.fromkeys((*allowed_tools, "Read", "Grep", "Glob")))
+
     cmd = [
         CLAUDE_BIN,
         "-p",
@@ -43,10 +50,15 @@ async def query(
     ]
     if allowed_tools:
         cmd += ["--allowedTools", *allowed_tools]
+    for directory in add_dirs:
+        cmd += ["--add-dir", directory]
     if system:
         cmd += ["--append-system-prompt", system]
 
-    logger.info("Invoking Claude CLI (model=%s, tools=%s)", model, ",".join(allowed_tools))
+    logger.info(
+        "Invoking Claude CLI (model=%s, tools=%s, add_dirs=%d)",
+        model, ",".join(allowed_tools), len(add_dirs),
+    )
 
     try:
         proc = await asyncio.create_subprocess_exec(

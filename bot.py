@@ -40,7 +40,7 @@ HELP_TEXT = (
     "/vehicles — list vehicles and pick the active one\n"
     "/select `<id>` — set the active vehicle\n"
     "/info — show the active vehicle\n"
-    "/fsm — show stored FSM docs (send me a PDF to add one)\n"
+    "/fsm — show stored FSM docs (send a PDF, or `/fsm <path>` for a markdown folder)\n"
     "/links — show cached videos & PDF manuals\n"
     "/help — show this help\n\n"
     "Then just *ask me* anything, e.g. _\"How do I replace the front brake pads?\"_"
@@ -206,21 +206,54 @@ async def cmd_fsm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     vehicle = db.get_active_vehicle(update.effective_user.id)
     if not vehicle:
-        await update.message.reply_text("No active vehicle. Use /vehicles or /addvehicle.")
+        await update.message.reply_text("אין רכב פעיל. שלח /start או /vehicles.")
         return
+
+    # /fsm <path> -> register a markdown FSM folder for the active vehicle.
+    raw_path = " ".join(context.args).strip() if context.args else ""
+    if raw_path:
+        await _register_fsm_dir(update, vehicle, raw_path)
+        return
+
     docs = db.get_fsm_docs(vehicle["id"])
     if not docs:
         await update.message.reply_text(
-            "No FSM documents stored. Send me a PDF service manual to attach it to "
-            f"*{vehicle['name']}*.",
+            f"אין מסמכי FSM שמורים ל-*{vehicle['name']}*.\n"
+            "אפשר לשלוח לי PDF של ספר שירות, או לרשום תיקיית markdown עם:\n"
+            "`/fsm <נתיב לתיקייה>`",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
-    lines = [f"📚 FSM docs for *{vehicle['name']}*:"]
+    lines = [f"📚 מסמכי FSM ל-*{vehicle['name']}*:"]
     for d in docs:
-        size = len(d.get("content_text") or "")
-        lines.append(f"- {d['title']} ({d['kind']}, {size} chars extracted)")
+        if d["kind"] == "dir":
+            lines.append(f"- 📁 {d['local_path']} (תיקיית markdown)")
+        else:
+            size = len(d.get("content_text") or "")
+            lines.append(f"- 📄 {d['title']} ({d['kind']}, {size} תווים)")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+async def _register_fsm_dir(update: Update, vehicle: dict, raw_path: str) -> None:
+    path = Path(raw_path.strip().strip('"').strip("'")).expanduser()
+    if not path.exists():
+        await update.message.reply_text(f"⚠️ הנתיב לא נמצא:\n`{path}`", parse_mode=ParseMode.MARKDOWN)
+        return
+    if not path.is_dir():
+        await update.message.reply_text(f"⚠️ זו אינה תיקייה:\n`{path}`", parse_mode=ParseMode.MARKDOWN)
+        return
+    md_count = sum(1 for _ in path.rglob("*.md"))
+    if md_count == 0:
+        await update.message.reply_text(
+            f"⚠️ לא נמצאו קבצי `.md` בתיקייה:\n`{path}`", parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    db.add_fsm_doc(vehicle["id"], title=path.name, kind="dir", local_path=str(path))
+    await update.message.reply_text(
+        f"📁 נרשמה תיקיית FSM ל-*{vehicle['name']}*:\n`{path}`\n"
+        f"({md_count} קבצי markdown). מעכשיו אבסס תשובות תחזוקה על המדריך הזה.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
 async def cmd_links(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

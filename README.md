@@ -116,6 +116,9 @@ The commands below also work alongside the guided flow:
 - `/info` — show the active vehicle's details.
 - Send a **PDF** — stored as an FSM document for the active vehicle (text extracted).
 - `/fsm` — list stored FSM documents.
+- `/fsm <path>` — register a **folder of markdown FSM files** (e.g. a full Factory
+  Service Manual) for the active vehicle. The bot then lets Claude grep that folder
+  (via `--add-dir`) to ground repair answers in the real manual — no size limit.
 - `/plate <מספר רכב>` — look up a license plate in the Israeli public registries
   (`data.gov.il`): the private/commercial registry **and** the personal-import
   registry. If found, shows the car's details and offers a one-tap **➕ Add to fleet**

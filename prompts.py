@@ -56,10 +56,25 @@ def _vehicle_block(vehicle: dict[str, Any]) -> str:
 
 
 def _fsm_block(fsm_docs: list[dict[str, Any]]) -> str:
-    if not fsm_docs:
+    text_docs = [d for d in fsm_docs if d.get("kind") != "dir"]
+    dir_docs = [d for d in fsm_docs if d.get("kind") == "dir"]
+
+    if not text_docs and not dir_docs:
         return "(no FSM documents stored for this vehicle)"
-    chunks = []
-    for doc in fsm_docs:
+
+    chunks: list[str] = []
+
+    if dir_docs:
+        paths = "\n".join(f"  - `{d['local_path']}`" for d in dir_docs if d.get("local_path"))
+        chunks.append(
+            "ספר השירות (FSM) של הרכב זמין כקבצי markdown בתיקיות הבאות:\n"
+            f"{paths}\n"
+            "לפני שאתה עונה על שאלת תחזוקה/תיקון, **חפש בתיקיות האלה** עם הכלים "
+            "Glob/Grep/Read את ההליך הרלוונטי, ובסס את התשובה על מה שכתוב במדריך. "
+            "ציין את שם הקובץ/הסעיף שממנו לקחת את המידע."
+        )
+
+    for doc in text_docs:
         header = f"### FSM: {doc.get('title') or doc.get('kind')}"
         text = (doc.get("content_text") or "").strip()
         if text:
@@ -70,6 +85,7 @@ def _fsm_block(fsm_docs: list[dict[str, Any]]) -> str:
             chunks.append(f"{header}\nSource: {doc['source_url']}")
         else:
             chunks.append(header)
+
     return "\n\n".join(chunks)
 
 
