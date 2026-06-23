@@ -51,7 +51,8 @@ def check_claude_cli() -> bool:
         return False
     try:
         out = subprocess.run(
-            [CLAUDE_BIN, "--version"], capture_output=True, text=True, timeout=30
+            [path, "--version"], capture_output=True, text=True, timeout=30,
+            shell=(path.lower().endswith((".cmd", ".bat"))),
         )
         ver = (out.stdout or out.stderr).strip().splitlines()[0] if out.stdout or out.stderr else "?"
         print(f"{OK} Claude CLI found: {path} ({ver})")

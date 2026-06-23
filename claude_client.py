@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import shutil
 
 from config import CLAUDE_BIN, CLAUDE_MODEL, CLAUDE_TIMEOUT
 
@@ -20,6 +22,24 @@ DEFAULT_TOOLS = ("WebSearch", "WebFetch")
 
 class ClaudeError(RuntimeError):
     """Raised when the Claude CLI fails, times out, or returns an error."""
+
+
+def _resolve_invocation(cmd: list[str]) -> list[str]:
+    """Resolve the Claude binary so it runs reliably across platforms.
+
+    On Windows, npm installs the CLI as ``claude.cmd`` (a batch shim). A bare
+    ``claude`` passed to ``create_subprocess_exec`` fails because Windows only
+    resolves ``.exe`` on PATH, and a ``.cmd`` cannot be executed directly — it
+    needs ``cmd.exe``. We resolve the full path with ``shutil.which`` (which
+    honors PATHEXT and finds ``claude.cmd``) and, for a ``.cmd``/``.bat`` shim,
+    invoke it through ``cmd.exe /c``.
+    """
+    exe = shutil.which(cmd[0]) or cmd[0]
+    rest = cmd[1:]
+    if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
+        comspec = os.environ.get("COMSPEC", "cmd.exe")
+        return [comspec, "/c", exe, *rest]
+    return [exe, *rest]
 
 
 async def query(
@@ -54,6 +74,8 @@ async def query(
         cmd += ["--add-dir", directory]
     if system:
         cmd += ["--append-system-prompt", system]
+
+    cmd = _resolve_invocation(cmd)
 
     logger.info(
         "Invoking Claude CLI (model=%s, tools=%s, add_dirs=%d)",
