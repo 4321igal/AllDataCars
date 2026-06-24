@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from config import DB_PATH
+from config import DB_PATH, HISTORY_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +315,56 @@ def get_cached_links(
 # --------------------------------------------------------------------------- #
 # Message history
 # --------------------------------------------------------------------------- #
+def _history_filename(vehicle: "dict | None") -> str:
+    """Return a history filename based on today's date and the vehicle name."""
+    import re
+    date = _now()[:10]  # YYYY-MM-DD
+    if vehicle and vehicle.get("name"):
+        safe = re.sub(r"[^\w֐-׿]+", "_", vehicle["name"]).strip("_")
+        return f"history_{date}_{safe}.md"
+    return f"history_{date}.md"
+
+
+def append_history_file(
+    user_id: int,
+    role: str,
+    content: str,
+    token_info: dict | None = None,
+    vehicle: "dict | None" = None,
+) -> None:
+    """Append a message to the user's history file.
+
+    Files are split per day and per vehicle: History/<user_id>/history_YYYY-MM-DD[_<vehicle>].md
+    """
+    folder = HISTORY_DIR / str(user_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    ts = _now().replace("T", " ").split(".")[0] + " UTC"
+    label = "משתמש" if role == "user" else "בוט"
+    entry = f"### {ts}\n\n**{label}:** {content}\n"
+    if token_info:
+        entry += (
+            f"\n> טוקנים: input={token_info['input_tokens']} "
+            f"cache_read={token_info['cache_read_tokens']} "
+            f"cache_create={token_info['cache_create_tokens']} "
+            f"output={token_info['output_tokens']} | "
+            f"${token_info['cost_usd']:.6f}\n"
+        )
+    entry += "\n---\n\n"
+    filename = _history_filename(vehicle)
+    with open(folder / filename, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+
+def save_pdf_to_history(user_id: int, src_path: "Path", filename: str) -> "Path":
+    """Copy a PDF sent by the user into History/<user_id>/pdfs/. Returns the dest path."""
+    import shutil
+    folder = HISTORY_DIR / str(user_id) / "pdfs"
+    folder.mkdir(parents=True, exist_ok=True)
+    dest = folder / filename
+    shutil.copy2(str(src_path), str(dest))
+    return dest
+
+
 def add_message(vehicle_id: Optional[int], user_id: int, role: str, content: str) -> None:
     with _connect() as conn:
         conn.execute(

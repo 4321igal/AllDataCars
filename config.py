@@ -20,6 +20,7 @@ CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "240"))
 # Storage
 DB_PATH = (BASE_DIR / os.getenv("DB_PATH", "data/fleet.db")).resolve()
 FSM_DIR = (BASE_DIR / os.getenv("FSM_DIR", "fsm_files")).resolve()
+HISTORY_DIR = (BASE_DIR / os.getenv("HISTORY_DIR", "History")).resolve()
 
 
 def _parse_ids(raw: str) -> set[int]:
@@ -42,6 +43,7 @@ def ensure_dirs() -> None:
     """Create storage directories if they do not exist."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     FSM_DIR.mkdir(parents=True, exist_ok=True)
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def validate() -> None:

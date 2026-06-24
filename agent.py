@@ -63,9 +63,10 @@ async def handle_message(user_id: int, text: str) -> AgentResult:
     fsm_dirs = tuple(db.get_fsm_dirs(vehicle_id)) if vehicle_id else ()
 
     db.add_message(vehicle_id, user_id, "user", text)
+    db.append_history_file(user_id, "user", text, vehicle=vehicle)
 
     try:
-        raw = await query(prompt, system=SYSTEM_PROMPT, add_dirs=fsm_dirs)
+        raw, token_info = await query(prompt, system=SYSTEM_PROMPT, add_dirs=fsm_dirs)
     except ClaudeError:
         raise
 
@@ -89,5 +90,6 @@ async def handle_message(user_id: int, text: str) -> AgentResult:
                 new_links += 1
 
     db.add_message(vehicle_id, user_id, "assistant", answer)
+    db.append_history_file(user_id, "assistant", answer, token_info=token_info, vehicle=vehicle)
 
     return AgentResult(answer=answer, videos=videos, pdfs=pdfs, new_links=new_links)

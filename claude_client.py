@@ -49,7 +49,7 @@ async def query(
     timeout: int = CLAUDE_TIMEOUT,
     model: str = CLAUDE_MODEL,
     add_dirs: tuple[str, ...] = (),
-) -> str:
+) -> tuple[str, dict]:
     """Run a single headless Claude query and return the text result.
 
     The prompt is fed on stdin to avoid shell-escaping / argument-length issues.
@@ -126,4 +126,22 @@ async def query(
     if not isinstance(result, str) or not result.strip():
         raise ClaudeError("Claude CLI returned an empty result field.")
 
-    return result.strip()
+    usage = payload.get("usage", {})
+    cost = payload.get("total_cost_usd") or 0.0
+    token_info = {
+        "input_tokens": usage.get("input_tokens", 0),
+        "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+        "cache_create_tokens": usage.get("cache_creation_input_tokens", 0),
+        "output_tokens": usage.get("output_tokens", 0),
+        "cost_usd": cost,
+    }
+    logger.info(
+        "Query cost: input=%d cache_read=%d cache_create=%d output=%d | $%.6f",
+        token_info["input_tokens"],
+        token_info["cache_read_tokens"],
+        token_info["cache_create_tokens"],
+        token_info["output_tokens"],
+        token_info["cost_usd"],
+    )
+
+    return result.strip(), token_info

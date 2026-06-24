@@ -5,6 +5,15 @@
 data/
 fsm_files/
 *.db
+*.db-shm
+*.db-wal
+
+# History (user conversations & uploaded PDFs)
+History/
+
+# FSM / vehicle docs
+2005-20010-Jeep-Grand-Cherokee-WK-FSM/
+*.pdf
 
 # Python
 __pycache__/
@@ -16,5 +25,9 @@ env/
 
 # OS / editor
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
+
+# Logs
+*.log

@@ -384,6 +384,19 @@ def _extract_pdf_text(path: Path) -> str:
         return ""
 
 
+def _pdf_to_markdown(src: Path, dest_md: Path) -> bool:
+    """Convert a PDF to Markdown via markitdown and write to dest_md. Returns True on success."""
+    try:
+        from markitdown import MarkItDown
+        md = MarkItDown()
+        result = md.convert(str(src))
+        dest_md.write_text(result.text_content, encoding="utf-8")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("markitdown conversion failed for %s: %s", src, exc)
+        return False
+
+
 async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _guard(update):
         return
@@ -403,6 +416,8 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     safe_name = doc.file_name or f"{doc.file_unique_id}.pdf"
     dest = config.FSM_DIR / f"{vehicle['id']}_{doc.file_unique_id}_{safe_name}"
     await file.download_to_drive(str(dest))
+    pdf_hist = db.save_pdf_to_history(user_id, dest, safe_name)
+    _pdf_to_markdown(dest, pdf_hist.with_suffix(".md"))
 
     text = _extract_pdf_text(dest)
     db.add_fsm_doc(
